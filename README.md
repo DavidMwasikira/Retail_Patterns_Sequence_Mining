@@ -1,2 +1,2 @@
-# Retail_Patterns_Sequence_Mining
+# Retail Products Recommendation Engine through the Apriori Algorithm
 Generalized Sequence Pattern Mining for Recommendation Engines
