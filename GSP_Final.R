@@ -1,0 +1,520 @@
+# Title:  Generalized Sequence Pattern (GSP)
+# File:   DMR_06_02_GSP.R
+# Course: Data Mining with R
+
+# INSTALL AND LOAD PACKAGES ################################
+
+# Install pacman if you don't have it (uncomment next line)
+# install.packages("pacman")
+
+# Install and/or load packages with pacman
+pacman::p_load(  # Use p_load function from pacman
+  datasets,      # R's built-in sample datasets
+  magrittr,      # Pipes
+  pacman,        # Load/unload packages
+  rio,           # Import/export data
+  tidyverse,     # So many reasons
+  readxl,        # Read Xlsx File from windows
+  plyr,
+  dplyr,
+  arules,     # For analyzing transaction data and patterns (frequent itemsets and association rules)
+  arulesViz,  # visualization for association rules and item-sets
+  ggplot2,    # Create graphics and charts
+  lubridate,  # R package that makes it easier to work with dates and times
+  RColorBrewer,
+  recommenderlab
+)
+
+
+# SET RANDOM SEED ##########################################
+
+# Set random seed for reproducibility in processes like
+# sampling and splitting the data
+set.seed(1)  # You can use any number here
+
+# LOAD AND PREPARE DATA ####################################
+
+# For our examples in this course, we'll use datasets from
+# the Machine Learning Repository at the University of
+# California, Irvine (UCI). Here is a link to the
+# repository's main page:
+browseURL("https://archive.ics.uci.edu/ml/machine-learning-databases/00514/")
+
+# Load Data
+library("readxl")
+library(data.table)
+
+# xlsx files
+retail_data <- read_excel("Online_Retail.xlsx", trim_ws = TRUE)
+
+
+# Column Names in Data
+colnames(retail_data)
+
+#Data structure
+str(retail_data)
+
+#add index column to data frame
+retail_data <- tibble::rowid_to_column(retail_data, "index")
+retail_data
+
+
+# Removing NAs from Dates Column
+my_data <- complete.cases(retail_data$Date)
+
+
+# Using mutate function from dplyr package to convert Description column to factor column. 
+retail_data %>% mutate(Description = as.factor(Description))
+
+retail_data %>% mutate(Country = as.factor(Country))
+
+#Converts character data to date. Store InvoiceDate as date in new variable
+retail_data$Date <- as.Date(retail_data$InvoiceDate)
+#Extract time from InvoiceDate and store in another variable
+TransTime<- format(retail_data$InvoiceDate,"%H:%M:%S")
+
+#Convert and edit InvoiceNo into numeric
+InvoiceNo <- as.numeric(as.character(retail_data$InvoiceNo))
+
+#Bind new columns TransTime and InvoiceNo into dataframe retail
+cbind(retail_data,TransTime)
+cbind(retail_data,InvoiceNo)
+
+# Removing Cancelled Orders. All Invoices starting with letter "C" imply orders were cancelled
+# if the InvoiceNo starts with letter 'C', it indicates a cancellation
+retail_data %>% 
+  filter(grepl("C", retail_data$InvoiceNo)) %>% 
+  dplyr::summarise(Total = n())
+
+## Cancellations are not needed for the analysis so they can be removed
+retail_data  <- retail_data %>% 
+  filter(!grepl("C", retail_data$InvoiceNo))
+
+
+# Removing Non - Product CODES
+
+## There are a handful of non-product related codes - creating a filter that can be updated in the future.
+stc <- c('AMAZONFEE', 'BANK CHARGES', 'C2', 'DCGSSBOY', 'DCGSSGIRL',
+         'DOT', 'gift_0001_', 'PADS', 'POST')
+
+## Summary
+retail_data %>%  
+  filter(grepl(paste(stc, collapse="|"), StockCode))  %>% 
+  group_by(StockCode, Description) %>% 
+  dplyr::summarise(count =n()) %>%
+  arrange(desc(count)) %>% 
+  ungroup()
+
+
+# Cleaning up Description Column
+
+## Additional adjustment codes to remove - again creating a filter that can be updated in the future.
+descr <- c( "check", "check?", "?", "??", "damaged", "found", 
+            "adjustment", "Amazon", "AMAZON", "amazon adjust", 
+            "Amazon Adjustment", "amazon sales", "Found", "FOUND",
+            "found box", "Found by jackie ", "Found in w/hse", "dotcom",
+            "dotcom adjust", "allocate stock for dotcom orders ta", "FBA",
+            "Dotcomgiftshop Gift Voucher £100.00", "on cargo order",
+            "wrongly sold (22719) barcode", "wrongly marked 23343",
+            "dotcomstock", "rcvd be air temp fix for dotcom sit", "Manual",
+            "John Lewis", "had been put aside", "for online retail orders",  
+            "taig adjust", "amazon", "incorrectly credited C550456 see 47",
+            "returned", "wrongly coded 20713", "came coded as 20713", 
+            "add stock to allocate online orders", "Adjust bad debt",
+            "alan hodge cant mamage this section", "website fixed",
+            "did  a credit  and did not tick ret", "michel oops",
+            "incorrectly credited C550456 see 47", "mailout", "test",
+            "Sale error",  "Lighthouse Trading zero invc incorr", "SAMPLES",
+            "Marked as 23343", "wrongly coded 23343","Adjustment", 
+            "rcvd be air temp fix for dotcom sit", "Had been put aside."
+)
+
+## Filtering out the unwanted entries.
+retail_data <- retail_data %>% 
+  filter(!Description %in% descr)
+
+## There are also some 600 NAs in _Description_. 
+sum(is.na(retail_data$Description))
+
+#get a glimpse of your data
+glimpse(retail_data)
+
+
+
+
+
+# Impute NAs with Column Mean Value
+average_missing <- apply(df_titanic[,colnames(df_titanic) %in% list_na],
+                         2,
+                         mean,
+                         na.rm =  TRUE)
+average_missing
+
+# Checking for missing values in the dataset:
+colSums(is.na(my_data_trim))
+
+# convert date column to date class
+my_data_trim$DATE <- as.Date(my_data_trim$DATE,
+                               format = "%m/%d/%y")
+
+# view R class of data
+class(my_data_trim$DATE)
+
+
+# view results
+head(boulder_precip$DATE)
+
+# Data Summary
+summary(my_data_trim)
+
+
+
+
+
+
+
+
+# Take random subsample to save time (if needed)
+df %<>% sample_n(500)
+
+# SPLIT DATA ###############################################
+
+# Split data into training (trn) and testing (tst) sets
+trn <- df %>% sample_frac(.70)  # 70% in training data
+tst <- df %>% anti_join(trn)    # Rest in testing data
+
+# EXPLORE DATA #############################################
+
+# Most Popular Items in Table Format
+retail_data %>% 
+  group_by(Description) %>% 
+  dplyr::summarize(count = n()) %>% 
+  mutate(pct=(count/sum(count))*100) %>% 
+  arrange(desc(pct)) %>% 
+  ungroup() %>% 
+  top_n(10, wt=pct)
+
+
+# Most Ordered Items Plot
+retail_data %>% 
+  group_by(Description) %>% 
+  dplyr::summarize(count = n()) %>% 
+  top_n(10, wt = count) %>%
+  arrange(desc(count)) %>% 
+  ggplot(aes(x = reorder(Description, count), y = count))+
+  geom_bar(stat = "identity", fill = "royalblue", colour = "blue") +
+  labs(x = "", y = "Top 10 Best Sellers", title = "Most Ordered Products") +
+  coord_flip() +
+  theme_grey(base_size = 12)
+
+
+# Average Number of Items per Purchase
+retail_data %>% 
+  group_by(InvoiceNo) %>% 
+  dplyr::summarise(n = mean(Quantity)) %>%
+  ggplot(aes(x=n)) +
+  geom_histogram(bins = 100000,fill = "purple",colour = "black") + 
+  coord_cartesian(xlim=c(0,100)) +
+  scale_x_continuous(breaks=seq(0,100,10)) +
+  labs(x = "Average Number of Items per Purchase", y = "") +
+  theme_grey(base_size = 14)
+
+
+# Create a File and store for Modeling with other Algorithms
+save_data <- retail_data[ , c("CustomerID", "Date", "InvoiceNo", "Description")]
+
+
+# Saving File For Future Sequence Pattern Modeling
+write.csv(save_data,'hmm_spade_transaction_data.csv', row.names=FALSE)
+
+# Take random subsample to save time (if needed)
+retail_data %<>% sample_n(80000)
+
+head(retail_data)
+
+
+# We now convert Dataframe into Transaction Format, Also known as Singles Format (All items bought together are placed in one row)
+#library(plyr)
+#ddply(dataframe, variables_to_be_used_to_split_data_frame, function_to_be_applied)
+transactionData <- ddply(retail_data,c("InvoiceNo","Date", "CustomerID"),
+                         function(df1)paste(df1$Description,
+                                            collapse = ","))
+
+
+# Create new column of number of count ot items for each transaction
+transactionData$counts <- lengths(strsplit(transactionData$V1, ","))
+
+# Next, as InvoiceNo and Date will not be of any use in the rule mining, you can set them to NULL
+
+#set column InvoiceNo of dataframe transactionData  
+transactionData$InvoiceNo <- NULL
+#set column Date of dataframe transactionData
+#transactionData$Date <- NULL
+
+#Rename column to items
+colnames(transactionData) <- c("Date", "CustomerID", "items", "counts")
+#Show Dataframe transactionData
+transactionData
+
+
+# Write the transaction data into a write.csv format
+write.csv(transactionData,"market_basket_transactions.csv", quote = FALSE, row.names = FALSE)
+
+
+# Read Transaction File
+transaction_matrix <- read.transactions('market_basket_transactions.csv', format = 'basket', sep=',')
+
+transaction_matrix
+
+
+
+
+# MODEL DATA ###############################################
+
+library(RColorBrewer)
+
+# Absolute Item Frequency Plot
+par(mar = rep(2, 4))
+itemFrequencyPlot(transaction_matrix,
+                  topN=20,type="absolute",
+                  col=brewer.pal(8,'Pastel1'), main="Absolute Item Frequency Plot")
+
+
+# Relative Item Frequency Plot
+graphics.off()
+#par(mar=c(1,1,1,1))
+par(mar = rep(2, 4))
+itemFrequencyPlot(transaction_matrix,
+                  topN=20,
+                  type="relative",
+                  col=brewer.pal(8,'Pastel2'),main="Relative Item Frequency Plot")
+
+
+
+# Generating Rules using the APRIORI algorithm
+
+# Min Support as 0.001, confidence as 0.8.
+association.rules <- apriori(transaction_matrix, parameter = list(supp=0.001, conf=0.8,maxlen=10))
+
+
+inspect(association.rules[1:10])
+
+
+# Limiting the number and size of rules.
+shorter.association.rules <- apriori(transaction_matrix, parameter = list(supp=0.001, conf=0.8,maxlen=3))
+
+
+# Removing redundant rules. These rules are subset of larger rules and there not neccessary.
+subset.rules <- which(colSums(is.subset(association.rules, association.rules)) > 1) # get subset rules in vector
+length(subset.rules)  #> 106640
+
+
+subset.association.rules. <- association.rules[-subset.rules] # remove subset rules.
+
+
+# Creating The Data Matrix
+  
+## Filtering by an order number which contains the same stock code more than once
+retail_data %>% 
+  filter(InvoiceNo == 557886 & StockCode == 22436) %>% 
+  select(InvoiceNo, StockCode, Quantity, UnitPrice, CustomerID)
+
+
+# Remove Duplicates
+retail_data <- retail_data %>% 
+  ## Create unique identifier
+  mutate(InNo_Desc = paste(InvoiceNo, Description, sep = ' ')) 
+## Filter out duplicates and drop unique identifier
+retail_data <- retail_data[!duplicated(retail_data$InNo_Desc), ] %>% 
+  select(-InNo_Desc)
+
+
+# Creating The Matrix
+ratings_matrix <- retail_data %>%
+  
+  ## Select only needed variables
+  select(InvoiceNo, Description) %>% 
+  
+  ## Add a column of 1s
+  mutate(value = 1) %>%
+  
+  ## Spread into user-item format
+  spread(Description, value, fill = 0) %>%
+  select(-InvoiceNo) %>%
+  
+  ## Convert to matrix
+  as.matrix()
+
+## Convert to recommenderlab class 'binaryRatingsMatrix'
+ratings_matrix <- as(ratings_matrix, "binaryRatingMatrix")
+
+ratings_matrix
+
+
+
+# Model Evaluation Scheme and Validation
+
+library("recommenderlab")
+scheme <- ratings_matrix %>% 
+  evaluationScheme(method = "cross",
+                   k      = 5, 
+                   train  = 0.8,  
+                   given  = -1)
+
+
+# Algorithm List
+
+algorithms <- list(
+  "association rules" = list(name  = "AR", 
+                             param = list(supp = 0.01, conf = 0.01)),
+  "random items"      = list(name  = "RANDOM",  param = NULL),
+  "popular items"     = list(name  = "POPULAR", param = NULL),
+  "item-based CF"     = list(name  = "IBCF", param = list(k = 5)),
+  "user-based CF"     = list(name  = "UBCF", 
+                             param = list(method = "Cosine", nn = 500))
+)
+
+
+# Estimating The Models
+
+results <- recommenderlab::evaluate(scheme, 
+                                    algorithms, 
+                                    type  = "topNList", 
+                                    n     = c(1, 3, 5, 10, 15, 20)
+)
+
+
+# Visualizing and Evaluating The Models
+
+## Pull into a list all confusion matrix information for one model 
+tmp <- results$`user-based CF` %>%
+  getConfusionMatrix()  %>%  
+  as.list() 
+
+## Calculate average value of 5 cross-validation rounds 
+as.data.frame( Reduce("+",tmp) / length(tmp)) %>% 
+  
+  ## Add a column to mark the number of recommendations calculated
+  mutate(n = c(1, 3, 5, 10, 15, 20)) %>%
+  
+  ## Select only columns needed and sorting out order 
+  select('n', 'precision', 'recall', 'TPR', 'FPR')
+
+
+avg_conf_matr <- function(results) {
+  tmp <- results %>%
+    getConfusionMatrix()  %>%  
+    as.list() 
+  as.data.frame(Reduce("+",tmp) / length(tmp)) %>% 
+    mutate(n = c(1, 3, 5, 10, 15, 20)) %>%
+    select('n', 'precision', 'recall', 'TPR', 'FPR') 
+}
+
+## Using map() to iterate function across all models
+results_tbl <- results %>%
+  map(avg_conf_matr) %>% 
+  
+  ## Turning into an unnested tibble
+  enframe() %>%
+  
+  ## Unnesting to have all variables on same level
+  unnest()
+
+results_tbl
+
+
+
+# ROC Curve
+
+results_tbl %>%
+  ggplot(aes(FPR, TPR, 
+             colour = fct_reorder2(as.factor(name), 
+                                   FPR, TPR))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "ROC curves", colour = "Model") +
+  theme_grey(base_size = 14)
+
+
+
+# Precision - Recal Curve
+results_tbl %>%
+  ggplot(aes(recall, precision, 
+             colour = fct_reorder2(as.factor(name),  
+                                   precision, recall))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "Precision-Recall curves", colour = "Model") +
+  theme_grey(base_size = 14)
+
+
+
+# Test Prediction
+
+## Create a made-up order with a string containing 6 products selected at random.
+customer_order <- c("GREEN REGENCY TEACUP AND SAUCER",
+                    "SET OF 3 BUTTERFLY COOKIE CUTTERS",
+                    "JAM MAKING SET WITH JARS",
+                    "SET OF TEA COFFEE SUGAR TINS PANTRY",
+                    "SET OF 4 PANTRY JELLY MOULDS")
+
+
+
+## Put string in a format that recommenderlab accepts.
+new_order_rat_matrix <- retail_data %>% 
+  select(Description) %>%
+  
+  ## Select item descriptions from retail dataset
+  unique() %>% 
+  mutate(value = as.numeric(Description %in% customer_order)) %>% 
+  
+  ## Add a 'value' column
+  spread(key = Description, value = value) %>% 
+  
+  ## Spread into sparse matrix format
+  as.matrix() 
+
+## Change to a matrix
+new_order_rat_matrix <-   as(new_order_rat_matrix, "binaryRatingMatrix") # Convert to recommenderlab class 'binaryRatingsMatrix'
+
+
+## Create a `Recommender`
+recomm <- Recommender(getData(scheme, 'train'), 
+                      method = "IBCF",   
+                      param = list(k = 5))
+
+
+## Pass the `Recommender` and the made-up order to the `predict` function to create 
+## A top 10 recommendation list for the new customer.
+pred <- predict(recomm, 
+                newdata = new_order_rat_matrix, 
+                n       = 10)
+
+
+## Inspect this pediction as a list
+as(pred, 'list')
+
+
+
+
+# CLEAN UP #################################################
+
+# Clear data
+rm(list = ls())  # Removes all objects from the environment
+
+# Clear packages
+detach("package:datasets", unload = T)  # For base packages
+p_unload(all)  # Remove all contributed packages
+
+# Clear plots
+graphics.off()  # Clears plots, closes all graphics devices
+
+# Clear console
+cat("\014")  # Mimics ctrl+L
+
+# Clear R
+#   You may want to use Session > Restart R, as well, which 
+#   resets changed options, relative paths, dependencies, 
+#   and so on to let you start with a clean slate
+
+# Clear mind :)
